@@ -1,4 +1,4 @@
-This MATLAB code simulates the propagation of optical pulses through a fiber optic system based on the nonlinear Schrödinger equation. The simulation includes both symmetric and asymmetric split-step Fourier methods. Here's an explanation of the key components:
+This Python code simulates the propagation of optical pulses through a fiber optic system based on the nonlinear Schrödinger equation. The simulation includes both symmetric and asymmetric split-step Fourier methods. Here's an explanation of the key components:
 
 ---
 
