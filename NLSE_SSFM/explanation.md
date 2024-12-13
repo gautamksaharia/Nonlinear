@@ -54,5 +54,3 @@ This Python code simulates the propagation of optical pulses through a fiber opt
 - **Legend and Titles**: Clearly label the input and output pulses for each case.
 
 ---
-
-This code is a robust framework for optical pulse propagation studies. If you want to enhance or customize the simulation further, let me know!
