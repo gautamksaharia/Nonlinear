@@ -1,0 +1,612 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Dec 23 14:56:22 2025
+
+@author: PHY
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# -----------------------------
+# Parameters
+# -----------------------------
+Nx = 1024          # spatial grid points
+L = 20.0          # half-domain size
+dx = 2 * L / Nx
+x = np.linspace(-L, L - dx, Nx)
+
+dt = 0.001         # time step
+Nt = 30000         # number of time steps
+output_every = 50
+
+epsilon = 0.0     # non-integrability strength   
+epsilon_tod =0.0  # non-integrability strength TOD
+v = 1.3            # relative velocity
+d = 10.0           # initial separation
+delta_phi = 0.0    # relative phase
+
+# -----------------------------
+# Fourier space
+# -----------------------------
+k = 2 * np.pi * np.fft.fftfreq(Nx, d=dx)
+
+
+# -----------------------------
+# Absorbing boundary mask
+# -----------------------------
+L_abs = 70.0
+alpha = 0.05
+mask = np.ones_like(x)
+idx = np.abs(x) > L_abs
+mask[idx] = np.exp(-alpha * (np.abs(x[idx]) - L_abs)**2)
+
+# -----------------------------
+# Soliton initial condition
+# -----------------------------
+def soliton(x, x0, v, phi):
+    return (1.0 / np.cosh(x - x0)) * np.exp(1j * (v * x + phi))
+
+psi1 = soliton(x, -d/2,  v/2, 0.0)
+psi2 = soliton(x,  d/2, -v/2, delta_phi)
+
+psi = psi1 + psi2
+
+plt.plot(abs(psi))
+plt.show()
+# -----------------------------
+# Diagnostics storage
+# -----------------------------
+times = []
+energies = []
+kinteic_energies = []
+interaction_energies = []
+
+mass = []
+momentum = []
+
+separations = []
+psi_history=[]
+
+
+# -----------------------------
+# Storage for phase tracking
+# -----------------------------
+
+phase_track = []
+
+# -----------------------------
+# Energy functional
+# -----------------------------
+def energy(psi):
+    psi_x = np.fft.ifft(1j * k * np.fft.fft(psi))
+    energy = np.trapezoid(0.5 * np.abs(psi_x)**2 - 0.5 * np.abs(psi)**4, x)
+    mass = np.trapezoid(np.abs(psi)**2, x)
+    momentum = 0.5*1j*(np.trapezoid(psi*np.conjugate(psi_x) -psi_x*np.conjugate(psi) , x))
+    kinetic_energy = np.trapezoid(0.5 * np.abs(psi_x)**2, x)
+    interaction_energy = np.trapezoid( - 0.5 * np.abs(psi)**4, x)
+    return energy, mass, momentum, kinetic_energy, interaction_energy
+
+# -----------------------------
+# Center-of-mass estimator
+# -----------------------------
+def soliton_centers(psi):
+    density = np.abs(psi)**2
+    left = x < 0
+    right = x > 0
+    xL = np.trapezoid(x[left] * density[left], x[left]) / np.trapezoid(density[left], x[left])
+    xR = np.trapezoid(x[right] * density[right], x[right]) / np.trapezoid(density[right], x[right])
+    return xL, xR
+
+# -----------------------------
+# Time evolution
+# -----------------------------
+for n in range(Nt):
+
+    
+    L_half = np.exp(-1j * (k**2 / 2) * (dt/2) - 1j*epsilon_tod*k**3 *(dt/2))
+    
+    # Linear half-step
+    psi_hat = np.fft.fft(psi)
+    psi_hat *= L_half
+    psi = np.fft.ifft(psi_hat)
+
+    # Nonlinear full-step (cubic + quintic)
+    nonlinear_phase = np.exp(1j * dt * np.abs(psi)**(2)    + 1j * dt * epsilon * np.abs(psi)**(4)    )
+    psi *= nonlinear_phase
+
+    # Linear half-step
+    psi_hat = np.fft.fft(psi)
+    psi_hat *= L_half
+    psi = np.fft.ifft(psi_hat)
+
+    # Absorbing boundaries
+    psi *= mask
+
+    # Diagnostics
+    if n % output_every == 0:
+        t = n * dt
+        E, mas, momentm, ke, it_eng = energy(psi)
+        xL, xR = soliton_centers(psi)
+
+        times.append(t)
+        energies.append(E)
+        kinteic_energies.append(ke)
+        interaction_energies.append(it_eng)
+        
+        mass.append(mas)
+        momentum.append(momentm)
+        separations.append(xR - xL)
+        psi_history.append(psi)
+        
+        abspsi = np.abs(psi)
+        idx = np.argmax(abspsi)
+        phase = np.angle(psi[idx])
+        phase_track.append(phase)
+
+        print(f"t = {t:.2f}, E = {E:.6f}, separation = {xR - xL:.3f}")
+
+# -----------------------------
+# Plot results
+# -----------------------------
+plt.figure(figsize=(12, 4))
+
+plt.subplot(1, 2, 1)
+plt.plot(times, energies)
+plt.xlabel("Time")
+plt.ylabel("Total Energy")
+plt.title("Energy evolution")
+plt.ylim(-5,5)
+
+plt.subplot(1, 2, 2)
+plt.plot(times, separations)
+plt.xlabel("Time")
+plt.ylabel("Soliton separation")
+plt.title("Collision outcome")
+
+plt.tight_layout()
+plt.show()
+
+
+plt.imshow(abs(np.array(psi_history)))
+plt.show()
+
+
+# -----------------------------
+# Plot results
+# -----------------------------
+plt.figure(figsize=(12, 4))
+
+plt.subplot(1, 2, 1)
+plt.plot(times, kinteic_energies)
+plt.xlabel("Time")
+plt.ylabel("kinetic Energy")
+plt.title("Energy evolution")
+plt.ylim(-5,5)
+
+plt.subplot(1, 2, 2)
+plt.plot(times, interaction_energies)
+plt.xlabel("Time")
+plt.ylabel("interaction enegy")
+plt.title("energy")
+
+plt.tight_layout()
+plt.show()
+
+
+
+
+
+
+
+times = np.array(times)
+phase_track = np.unwrap(np.array(phase_track))
+
+# Remove trivial phase evolution
+eta =1
+omega1 = eta**2 - v**2 / 4
+phase_corrected = phase_track + omega1 * times
+
+# -----------------------------
+# Phase shift calculation
+# -----------------------------
+phi_before = np.mean(phase_corrected[times < 10.5])
+phi_after  = np.mean(phase_corrected[times > 25.5])
+
+Delta_phi = phi_after - phi_before
+
+print(f"Numerical phase shift Δφ = {Delta_phi:.6f}")
+
+
+
+# -----------------------------
+# Plot
+# -----------------------------
+plt.figure(figsize=(7,4))
+plt.plot(times, phase_corrected, lw=2)
+plt.axvline(1.5, ls='--', color='k')
+plt.axvline(4.5, ls='--', color='k')
+plt.xlabel("Time")
+plt.ylabel("Corrected soliton phase")
+plt.title("Numerical soliton phase shift")
+plt.tight_layout()
+plt.show()
+
+
+
+
+# -----------------------------
+# Plot
+# -----------------------------
+plt.figure(figsize=(7,4))
+plt.plot(times, np.array(mass), lw=2)
+plt.xlabel("Time")
+plt.ylabel("mass")
+plt.title("norm mass")
+# Disable both the offset and scientific notation
+plt.ylim(0,6)
+plt.tight_layout()
+plt.show()
+
+
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Jan 22 16:07:16 2026
+
+@author: PHY
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ----------------------------
+# Parameters for the solitons
+# ----------------------------
+eta1 = 1.0    # amplitude of soliton 1
+eta2 = 0.8    # amplitude of soliton 2
+xi1  = 0.5    # velocity of soliton 1
+xi2  = -0.3   # velocity of soliton 2
+delta1 = 0.0  # initial position/phase shift soliton 1
+delta2 = 0.0  # initial position/phase shift soliton 2
+
+# ----------------------------
+# Spatial grid
+# ----------------------------
+x = np.linspace(-20, 20, 2000)  # space
+t = -5                          # time
+
+# ----------------------------
+# Define theta and phi
+# ----------------------------
+theta1 = eta1 * (x - 2 * xi1 * t)
+theta2 = eta2 * (x - 2 * xi2 * t)
+
+phi1 = xi1 * x + (eta1**2 - xi1**2) * t
+phi2 = xi2 * x + (eta2**2 - xi2**2) * t
+
+# ----------------------------
+# Interaction coefficients
+# ----------------------------
+alpha = ((eta1 - eta2)**2 + (xi1 - xi2)**2) / ((eta1 + eta2)**2 + (xi1 - xi2)**2)
+beta  = 4 * eta1 * eta2 / ((eta1 + eta2)**2 + (xi1 - xi2)**2)
+
+# ----------------------------
+# Numerator and Denominator
+# ----------------------------
+N = (eta1 * np.cosh(theta2 + delta2) * np.exp(1j*phi1) +
+     eta2 * np.cosh(theta1 + delta1) * np.exp(1j*phi2) +
+     alpha * (eta1 * np.cosh(theta2 - delta2) * np.exp(1j*phi1) +
+              eta2 * np.cosh(theta1 - delta1) * np.exp(1j*phi2)))
+
+D = np.cosh(theta1 + theta2 + delta1 + delta2) + beta * np.cosh(theta1 - theta2 + delta1 - delta2)
+
+# ----------------------------
+# Two-soliton solution
+# ----------------------------
+psi = N / D
+
+# ----------------------------
+# Plot amplitude
+# ----------------------------
+plt.figure(figsize=(10,5))
+plt.plot(x, np.abs(psi), 'b', linewidth=2)
+plt.title('Two-Soliton Solution of Focusing NLS at t = 0')
+plt.xlabel('x')
+plt.ylabel('|ψ(x,t)|')
+plt.grid(True)
+plt.show()
+
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ----------------------------
+# Parameters for the solitons
+# ----------------------------
+eta1 = 1.0    # amplitude of soliton 1
+eta2 = 0.8    # amplitude of soliton 2
+xi1  = 0.5    # velocity of soliton 1
+xi2  = -0.3   # velocity of soliton 2
+delta1 = 0.0  # initial position/phase shift soliton 1
+delta2 = 0.0  # initial position/phase shift soliton 2
+
+# ----------------------------
+# Spatial and temporal grid
+# ----------------------------
+x = np.linspace(-10, 10, 400)   # space
+t = np.linspace(-10, 10, 400)   # time
+X, T = np.meshgrid(x, t)        # 2D grid
+
+# ----------------------------
+# Define theta and phi
+# ----------------------------
+theta1 = eta1 * (X - 2 * xi1 * T)
+theta2 = eta2 * (X - 2 * xi2 * T)
+
+phi1 = xi1 * X + (eta1**2 - xi1**2) * T
+phi2 = xi2 * X + (eta2**2 - xi2**2) * T
+
+# ----------------------------
+# Interaction coefficients
+# ----------------------------
+alpha = ((eta1 - eta2)**2 + (xi1 - xi2)**2) / ((eta1 + eta2)**2 + (xi1 - xi2)**2)
+beta  = 4 * eta1 * eta2 / ((eta1 + eta2)**2 + (xi1 - xi2)**2)
+
+# ----------------------------
+# Numerator and Denominator
+# ----------------------------
+N = (eta1 * np.cosh(theta2 + delta2) * np.exp(1j*phi1) +
+     eta2 * np.cosh(theta1 + delta1) * np.exp(1j*phi2) +
+     alpha * (eta1 * np.cosh(theta2 - delta2) * np.exp(1j*phi1) +
+              eta2 * np.cosh(theta1 - delta1) * np.exp(1j*phi2)))
+
+D = np.cosh(theta1 + theta2 + delta1 + delta2) + beta * np.cosh(theta1 - theta2 + delta1 - delta2)
+
+# ----------------------------
+# Two-soliton solution
+# ----------------------------
+psi = N / D
+amp = np.abs(psi)  # amplitude
+
+# ----------------------------
+# Plot amplitude as heatmap
+# ----------------------------
+plt.figure(figsize=(8,6))
+plt.pcolormesh(X, T, amp, shading='auto', cmap='viridis')
+plt.colorbar(label='|ψ(x,t)|')
+plt.xlabel('x')
+plt.ylabel('t')
+plt.title('Two-Soliton Solution of Focusing NLS')
+plt.show()
+
+
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Jan 22 16:44:45 2026
+
+@author: PHY
+"""
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ----------------------------
+# Two soliton function (example)
+# ----------------------------
+def two_solitons(x, c1=1.0, x01=0.3, c2=0.5, x02=0.7):
+    """
+    Superposition of two solitons
+    """
+    u1 = c1 * (1 / np.cosh(np.sqrt(c1) * (x - x01)))**2
+    u2 = c2 * (1 / np.cosh(np.sqrt(c2) * (x - x02)))**2
+    return u1 + u2
+
+# Domain
+x = np.linspace(-10, 10, 500)
+u = two_solitons(x)
+
+# ----------------------------
+# Uniform sampling (initial points)
+# ----------------------------
+num_uniform = 30
+uniform_points = np.linspace(-10, 10, num_uniform)
+
+# ----------------------------
+# Compute curvature |u_xx|
+# ----------------------------
+dx = x[1] - x[0]
+u_xx = np.gradient(np.gradient(u, dx), dx)
+curvature = np.abs(u_xx)
+
+# ----------------------------
+# Adaptive sampling proportional to curvature
+# ----------------------------
+num_adaptive = 40
+probabilities = curvature / np.sum(curvature)
+adaptive_points = np.random.choice(x, size=num_adaptive, p=probabilities)
+
+# ----------------------------
+# Plotting
+# ----------------------------
+plt.figure(figsize=(10, 5))
+plt.plot(x, u, color='black', label='Two Solitons')
+plt.scatter(uniform_points, two_solitons(uniform_points), color='blue', label='Uniform Points', s=50)
+plt.scatter(adaptive_points, two_solitons(adaptive_points), color='red', label='Adaptive Points (Curvature)', s=50)
+plt.xlabel('x')
+plt.ylabel('u(x)')
+plt.title('Two Solitons with Curvature-Based Adaptive Sampling')
+plt.legend()
+plt.show()
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Jan 22 16:50:38 2026
+
+@author: PHY
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ----------------------------
+# 1D Soliton in time function
+# ----------------------------
+def soliton(x, t, c=1.0, x0=0.3, velocity=0.5):
+    """Single soliton moving to the right"""
+    return c * (1 / np.cosh(np.sqrt(c) * (x - x0 - velocity*t)))**2
+
+def two_solitons(x, t):
+    """Superposition of two solitons moving toward each other"""
+    u1 = soliton(x, t, c=1.0, x0=0.3, velocity=0.5)
+    u2 = soliton(x, t, c=0.8, x0=0.7, velocity=-0.3)
+    return u1 + u2
+
+# ----------------------------
+# Space-time domain
+# ----------------------------
+x = np.linspace(-10, 10, 200)
+t = np.linspace(-10, 10, 200)
+X, T = np.meshgrid(x, t)
+
+# Compute solution
+U = two_solitons(X, T)
+
+# ----------------------------
+# Compute curvature |u_xx|
+# ----------------------------
+dx = x[1] - x[0]
+dt = t[1] - t[0]
+
+U_xx = np.gradient(np.gradient(U, dx, axis=1), dx, axis=1)
+U_tt = np.gradient(np.gradient(U, dt, axis=0), dt, axis=0)
+curvature = np.sqrt(U_xx**2 + U_tt**2)  # combined curvature in space-time
+
+# ----------------------------
+# Adaptive sampling proportional to curvature
+# ----------------------------
+num_adaptive = 1000
+flat_curv = curvature.flatten()
+flat_X = X.flatten()
+flat_T = T.flatten()
+probabilities = flat_curv / np.sum(flat_curv)
+adaptive_indices = np.random.choice(len(flat_X), size=num_adaptive, p=probabilities)
+adaptive_x = flat_X[adaptive_indices]
+adaptive_t = flat_T[adaptive_indices]
+
+# ----------------------------
+# Plot heatmap + adaptive points
+# ----------------------------
+plt.figure(figsize=(10, 6))
+plt.pcolormesh(X, T, curvature, shading='auto', cmap='viridis')
+plt.colorbar(label='Curvature (|u_xx| or combined)')
+plt.scatter(adaptive_x, adaptive_t, color='red', s=10, label='Adaptive Points (Curvature)')
+plt.xlabel('x')
+plt.ylabel('t')
+plt.title('Curvature Heatmap for Two Solitons in Space-Time')
+plt.legend()
+plt.show()
+
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Jan 22 16:38:12 2026
+
+@author: PHY
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Create 2D domain
+x = np.linspace(0, 1, 100)
+y = np.linspace(0, 1, 100)
+X, Y = np.meshgrid(x, y)
+
+# Example PDE residual: high around a circular region (x-0.6)^2 + (y-0.4)^2 ~ 0.05
+residual = np.exp(-((X-0.6)**2 + (Y-0.4)**2)/(2*0.02))
+
+# Uniformly sampled points (initial training)
+num_uniform = 50
+uniform_x = np.random.uniform(0, 1, num_uniform)
+uniform_y = np.random.uniform(0, 1, num_uniform)
+
+# Adaptive sampling: more points where residual is high
+flat_residual = residual.flatten()
+flat_X = X.flatten()
+flat_Y = Y.flatten()
+probabilities = flat_residual / np.sum(flat_residual)
+num_adaptive = 50
+adaptive_indices = np.random.choice(len(flat_X), size=num_adaptive, p=probabilities)
+adaptive_x = flat_X[adaptive_indices]
+adaptive_y = flat_Y[adaptive_indices]
+
+# Plotting
+plt.figure(figsize=(8, 6))
+plt.contourf(X, Y, residual, levels=50, cmap='viridis')
+plt.scatter(uniform_x, uniform_y, color='blue', label='Uniform Points', s=50)
+plt.scatter(adaptive_x, adaptive_y, color='red', label='Adaptive Points', s=50)
+plt.colorbar(label='PDE Residual (high = hard region)')
+plt.xlabel('x')
+plt.ylabel('y')
+plt.title('2D PINN Sampling: Uniform vs Adaptive')
+plt.legend()
+plt.show()
+
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ----------------------------
+# 1D Soliton function (example)
+# ----------------------------
+def soliton(x, c=1.0, x0=0.5):
+    """
+    A simple 1D soliton (sech^2) centered at x0 with amplitude c
+    """
+    return c * (1 / np.cosh(np.sqrt(c) * (x - x0)))**2
+
+# Domain
+x = np.linspace(-10, 10, 500)
+u = soliton(x)
+
+# ----------------------------
+# Uniform sampling (initial points)
+# ----------------------------
+num_uniform = 20
+uniform_points = np.linspace(-10, 10, num_uniform)
+
+# ----------------------------
+# Compute curvature |u_xx|
+# ----------------------------
+dx = x[1] - x[0]
+u_xx = np.gradient(np.gradient(u, dx), dx)
+curvature = np.abs(u_xx)
+
+# ----------------------------
+# Adaptive sampling proportional to curvature
+# ----------------------------
+num_adaptive = 20
+probabilities = curvature / np.sum(curvature)
+adaptive_points = np.random.choice(x, size=num_adaptive, p=probabilities)
+
+# ----------------------------
+# Plotting
+# ----------------------------
+plt.figure(figsize=(10, 5))
+plt.plot(x, u, color='black', label='Soliton')
+plt.scatter(uniform_points, soliton(uniform_points), color='blue', label='Uniform Points', s=50)
+plt.scatter(adaptive_points, soliton(adaptive_points), color='red', label='Adaptive Points (Curvature)', s=50)
+plt.xlabel('x')
+plt.ylabel('u(x)')
+plt.title('1D Soliton with Curvature-Based Adaptive Sampling')
+plt.legend()
+plt.show()
+
+
+
+
+
+
+
+
+
+
